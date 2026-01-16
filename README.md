@@ -11,9 +11,9 @@ A project with the goal to build a high-performance, low-latency task scheduling
     * **FIFO:** Standard First-In-First-Out processing.
     * **Priority:** Rank-based task execution for critical test paths.
     * **Work-Stealing:** Efficient load balancing using per-thread queues to minimize contention.
-* **High Performance:** * Targeting **< 100ns dispatch overhead**.
+* **High Performance:** Targeting < 100ns dispatch overhead.
     * **Zero-allocation** in the hot path to prevent GC-like pauses.
-    * Thread-safety using **lock-free primitives** and atomic state machines where applicable.
+    * **Thread-safety** using lock-free primitives and atomic state machines where applicable.
 * **Graceful Shutdown:** Implements task draining to ensure all submitted work is completed before system exit.
 
 
