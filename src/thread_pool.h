@@ -12,12 +12,12 @@
 
 class ThreadPool {
 private:
+    size_t num_threads_;
     std::atomic<bool> stop_;
     std::mutex queue_mutex_;
     std::condition_variable condition_;
     std::queue<Task*> task_queue_;
     std::vector<std::thread> threads_;
-    size_t num_threads_;
 
     void workerLoop(){
         while (true) {
@@ -33,7 +33,7 @@ private:
                     return;
                 }
                 // else get next  task
-                Task* task = task_queue_.front();
+                task = task_queue_.front();
                 task_queue_.pop();
             } // lock release here
             if (task) {
@@ -49,8 +49,8 @@ public:
 
     //Constructor
     explicit ThreadPool(size_t num_threads): 
-        stop_(false), 
-        num_threads_(num_threads)
+        num_threads_(num_threads) ,   
+        stop_(false) 
     {
         for (size_t i = 0; i < num_threads_; ++i) {
             threads_.emplace_back([this]() {workerLoop(); });

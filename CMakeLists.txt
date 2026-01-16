@@ -12,6 +12,9 @@ add_library(task_scheduler
 
 target_include_directories(task_scheduler PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
-# Test executable (später)
+# Test executable
 add_executable(test_basic tests/test_basic.cpp)
 target_link_libraries(test_basic task_scheduler)
+
+add_executable(test_threadpool tests/test_threadpool.cpp)
+target_link_libraries(test_threadpool task_scheduler pthread)
