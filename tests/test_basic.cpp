@@ -61,7 +61,6 @@ int main() {
     std::cout << "\nAssert copying does not work" << std::endl;
     // Task copy = mathOperation; // triggers a compile error when uncommented
 
-    
+
     std::cout << "\n🎉 All tests passed!" << std::endl;
-    return 0;
 }
