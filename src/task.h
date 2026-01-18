@@ -12,9 +12,14 @@ enum class TaskState {
 };
 
 class Task {
+private:
     uint64_t id_;
     std::atomic<TaskState> state_;
     std::function<void()> work_;
+
+    std::atomic<int> pending_deps_{0};
+    std::vector<Task*> dependents_;
+    std::mutex deps_mutex
 
     public:
         Task(const Task&) = delete;
@@ -30,6 +35,7 @@ class Task {
             state_.store(TaskState::RUNNING, std::memory_order_release);
             work_();
             state_.store(TaskState::COMPLETED, std::memory_order_release);
+            onComplete()
         }
 
         std::uint64_t getId() const{
@@ -38,6 +44,26 @@ class Task {
 
         TaskState getState() const{
             return state_.load(std::memory_order_acquire);
+        }
+
+        void addDependency(Task* dependency){
+            std::lock_guard<std::mutex> lock(deps_mutex_);
+            dependency->dependents_.emplace_back(this);
+            pending_deps_ ++;
+        }
+
+        void onComplete() {
+            for (auto& dependent : dependents_) {
+                dependent->pending_deps_ --;
+            }
+        }
+
+        bool isReady() const {
+            if (pending_deps_ == 0) {
+                return true;
+            } else {
+                return false;
+            }
         }
 
 };
