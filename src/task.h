@@ -1,9 +1,12 @@
+// /src/task.h
+
 #pragma once
 
 #include <atomic>
 #include <functional>
 #include <cstdint>
-
+#include <vector>
+#include <mutex>
 
 enum class TaskState {
     PENDING,
@@ -19,51 +22,59 @@ private:
 
     std::atomic<int> pending_deps_{0};
     std::vector<Task*> dependents_;
-    std::mutex deps_mutex
+    std::mutex deps_mutex_;
 
-    public:
-        Task(const Task&) = delete;
-        Task& operator=(const Task&) = delete;
+public:
+    // disable copying
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
 
-        Task(uint64_t id, std::function<void()> work):
-            id_(id),
-            state_(TaskState::PENDING),
-            work_(std::move(work))
-        { }
+    // Constructor
+    Task(uint64_t id, std::function<void()> work):
+        id_(id),
+        state_(TaskState::PENDING),
+        work_(std::move(work))
+    {}
+    // Getters
+    uint64_t getId() const{
+        return id_;
+    }
+    TaskState getState() const{
+        return state_.load(std::memory_order_acquire);
+    }
 
-        void execute() {
-            state_.store(TaskState::RUNNING, std::memory_order_release);
-            work_();
-            state_.store(TaskState::COMPLETED, std::memory_order_release);
-            onComplete()
-        }
+    // executes the task
+    void execute() {
+        state_.store(TaskState::RUNNING, std::memory_order_release);
+        work_();
+        state_.store(TaskState::COMPLETED, std::memory_order_release);
+        onComplete();
+    }
 
-        std::uint64_t getId() const{
-            return id_;
-        }
+    // adds a task that depends on this task
+    void addDependency(Task* dependency){
+        pending_deps_.fetch_add(1, std::memory_order_relaxed);
+        
+        // Lock mutex of dependency and add this task to its dependents list
+        std::lock_guard<std::mutex> lock(dependency->deps_mutex_);
+        dependency->dependents_.emplace_back(this);  
+    }
 
-        TaskState getState() const{
-            return state_.load(std::memory_order_acquire);
-        }
+    // called on completion of this task
+    void onComplete() {
+        std::lock_guard<std::mutex> lock(deps_mutex_);
 
-        void addDependency(Task* dependency){
-            std::lock_guard<std::mutex> lock(deps_mutex_);
-            dependency->dependents_.emplace_back(this);
-            pending_deps_ ++;
-        }
-
-        void onComplete() {
-            for (auto& dependent : dependents_) {
-                dependent->pending_deps_ --;
+        for (Task* dependent : dependents_) {
+            int old_count = dependent->pending_deps_.fetch_sub(1, std::memory_order_relaxed);
+        
+            if (old_count == 1) {
+                // dependent task now ready (-> auto scheduler)
             }
         }
+    }
 
-        bool isReady() const {
-            if (pending_deps_ == 0) {
-                return true;
-            } else {
-                return false;
-            }
-        }
+    bool isReady() const {
+        return pending_deps_.load(std::memory_order_acquire) == 0;
+    }
 
 };
