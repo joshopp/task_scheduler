@@ -24,6 +24,8 @@ private:
     std::vector<Task*> dependents_;
     std::mutex deps_mutex_;
 
+    std::function<void(Task*)> on_complete_callback_;
+
 public:
     // disable copying
     Task(const Task&) = delete;
@@ -35,6 +37,7 @@ public:
         state_(TaskState::PENDING),
         work_(std::move(work))
     {}
+
     // Getters
     uint64_t getId() const{
         return id_;
@@ -42,6 +45,11 @@ public:
     TaskState getState() const{
         return state_.load(std::memory_order_acquire);
     }
+
+    // Setter (callback)
+    void setOnCompleteCallback(std::function<void(Task*)> callback) {
+    on_complete_callback_ = callback;
+}
 
     // executes the task
     void execute() {
@@ -65,11 +73,11 @@ public:
         std::lock_guard<std::mutex> lock(deps_mutex_);
 
         for (Task* dependent : dependents_) {
-            int old_count = dependent->pending_deps_.fetch_sub(1, std::memory_order_relaxed);
-        
-            if (old_count == 1) {
-                // dependent task now ready (-> auto scheduler)
-            }
+            dependent->pending_deps_.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        if (on_complete_callback_) {
+            on_complete_callback_(this);
         }
     }
 
