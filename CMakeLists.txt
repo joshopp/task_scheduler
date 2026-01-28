@@ -21,3 +21,6 @@ target_link_libraries(test_dependencies task_scheduler pthread)
 
 add_executable(test_scheduler tests/test_scheduler.cpp)
 target_link_libraries(test_scheduler task_scheduler pthread)
+
+add_executable(benchmarks tests/benchmarks.cpp)
+target_link_libraries(benchmarks task_scheduler pthread)
