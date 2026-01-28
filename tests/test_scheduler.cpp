@@ -12,29 +12,29 @@ int main() {
     int data = 0;
     
     // Erstelle Tasks
-    Task* taskA = new Task(1, [&data]() {
+    auto taskA = std::make_unique<Task>(1, [&data]() {
         std::cout << "  TaskA: Loading..." << std::endl;
         data = 10;
     });
-    
-    Task* taskB = new Task(2, [&data]() {
+
+    auto taskB = std::make_unique<Task>(2, [&data]() {
         std::cout << "  TaskB: Processing..." << std::endl;
         data *= 2;
     });
     
-    Task* taskC = new Task(3, [&data]() {
+    auto taskC = std::make_unique<Task>(3, [&data]() {
         std::cout << "  TaskC: Saving..." << std::endl;
         data += 5;
     });
     
     // setup Dependencies
-    taskB->addDependency(taskA);
-    taskC->addDependency(taskB);
+    taskB->addDependency(taskA.get());
+    taskC->addDependency(taskB.get());
     
     // submit all and wait
-    scheduler.submit(taskA);
-    scheduler.submit(taskB);
-    scheduler.submit(taskC);
+    scheduler.submit(std::move(taskA));
+    scheduler.submit(std::move(taskB));
+    scheduler.submit(std::move(taskC));
     scheduler.waitAll();
     
     assert(data == 25);
