@@ -12,6 +12,7 @@
 class TaskScheduler {
 private:
     ThreadPool pool_;
+    std::vector<std::unique_ptr<Task>> owned_tasks_;
     std::vector<Task*> all_tasks_;
     std::vector<Task*> pending_tasks_;
     std::mutex pending_mutex_;
@@ -60,17 +61,21 @@ public:
     }
     
     // Submit Task (erkennt Dependencies automatisch)
-    void submit(Task* task) {
-        all_tasks_.push_back(task);
-        task->setOnCompleteCallback([this](Task* t){
+    void submit(std::unique_ptr<Task> task) {
+        Task* raw_task = task.get();
+
+        owned_tasks_.push_back(std::move(task));
+        all_tasks_.push_back(raw_task);
+
+        raw_task->setOnCompleteCallback([this](Task* t){
             this->onTaskCompleted(t);
         });
 
-        if (task->isReady()) {
-            pool_.submit(task);
+        if (raw_task->isReady()) {
+            pool_.submit(raw_task);
         } else {
             std::lock_guard<std::mutex> lock(pending_mutex_);
-            pending_tasks_.push_back(task);
+            pending_tasks_.push_back(raw_task);
         }
     }
     
