@@ -59,56 +59,88 @@ void benchmark_scaling() {
 
 
 
-// Benchmark: Measure overhead of dispatching a task
-void benchmark_overhead() {
+// Benchmark: Measure overhead of submit and end-to-end latency
+void benchmark_latency() {
     const int NUM_MEASUREMENTS = 1000;
     TaskScheduler scheduler(4);
     
-    std::vector<uint64_t> latencies;
-    latencies.reserve(NUM_MEASUREMENTS);
+    // Warmup
+    std::cout << "Warming up...\n";
+    for (int i = 0; i < 100; ++i) {
+        auto task = std::make_unique<Task>(i, []() {
+            volatile int x = 0;
+            for (int j = 0; j < 1000; ++j) x += j;
+        });
+        scheduler.submit(std::move(task));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    // 2 separate vectors for the two metrics
+    std::vector<uint64_t> submit_overhead;
+    std::vector<uint64_t> end_to_end_latency;
+    submit_overhead.reserve(NUM_MEASUREMENTS);
+    end_to_end_latency.reserve(NUM_MEASUREMENTS);
     
-    for (int i = 0; i < NUM_MEASUREMENTS; ++i) {
-        auto submit_time = std::chrono::high_resolution_clock::now();
-        
+    for (int i = 0; i < NUM_MEASUREMENTS; ++i) {        
         std::atomic<bool> task_started{false};
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
+        auto task_start_time = std::chrono::high_resolution_clock::now();
+
         auto task = std::make_unique<Task>(i, [&]() {
-            start_time = std::chrono::high_resolution_clock::now();
+            task_start_time = std::chrono::high_resolution_clock::now();
             task_started.store(true, std::memory_order_release);
         });
         
+        auto e2e_start = std::chrono::high_resolution_clock::now();
+
+        auto submit_start = std::chrono::high_resolution_clock::now();
         scheduler.submit(std::move(task));
-        
-        // wait until task has started
+        auto submit_end = std::chrono::high_resolution_clock::now();
+
         while (!task_started.load(std::memory_order_acquire)) {
             std::this_thread::yield();
         }
         
-        auto latency = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            start_time - submit_time).count();
+        // submit overhead:
+        uint64_t submit_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            submit_end - submit_start).count();
         
-        latencies.push_back(latency);
+        // End-to End latency
+        uint64_t e2e_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            task_start_time - e2e_start).count();
+        
+        submit_overhead.push_back(submit_ns);
+        end_to_end_latency.push_back(e2e_ns);
     }
     
-    // Stat tracking
-    std::sort(latencies.begin(), latencies.end());
+    scheduler.waitAll();
     
-    uint64_t min = latencies.front();
-    uint64_t max = latencies.back();
-    uint64_t median = latencies[NUM_MEASUREMENTS / 2];
-    uint64_t p95 = latencies[(NUM_MEASUREMENTS * 95) / 100];
-    uint64_t p99 = latencies[(NUM_MEASUREMENTS * 99) / 100];
+    // calculate and print stats
+    auto print_stats = [](const std::string& name, std::vector<uint64_t>& data) {
+        std::sort(data.begin(), data.end());
+        
+        uint64_t min = data.front();
+        uint64_t max = data.back();
+        uint64_t median = data[data.size() / 2];
+        uint64_t p95 = data[(data.size() * 95) / 100];
+        uint64_t p99 = data[(data.size() * 99) / 100];
+        double avg = std::accumulate(data.begin(), data.end(), 0.0) / data.size();
+        
+        std::cout << "\n" << name << ":\n";
+        std::cout << "  Min:    " << min << " ns\n";
+        std::cout << "  Avg:    " << avg << " ns\n";
+        std::cout << "  Median: " << median << " ns\n";
+        std::cout << "  P95:    " << p95 << " ns\n";
+        std::cout << "  P99:    " << p99 << " ns\n";
+        std::cout << "  Max:    " << max << " ns\n";
+    };
     
-    double avg = std::accumulate(latencies.begin(), latencies.end(), 0.0) / NUM_MEASUREMENTS;
+    std::cout << "\nBenchmark: Latency Analysis (" << NUM_MEASUREMENTS << " measurements)\n";
+    std::cout << "=================================================================\n";
     
-    std::cout << "Benchmark: Dispatch Overhead (1,000 measurements)\n";
-    std::cout << "  Min:    " << min << " ns\n";
-    std::cout << "  Avg:    " << avg << " ns\n";
-    std::cout << "  Median: " << median << " ns\n";
-    std::cout << "  P95:    " << p95 << " ns\n";
-    std::cout << "  P99:    " << p99 << " ns\n";
-    std::cout << "  Max:    " << max << " ns\n\n";
+    print_stats("1) submit() Overhead (pure scheduling cost)", submit_overhead);
+    print_stats("2) End-to-End Latency (submit → task starts)", end_to_end_latency);
+    
+    std::cout << "\n";
 }
 
 
@@ -148,21 +180,29 @@ void benchmark_dependencies() {
         
         auto start = std::chrono::high_resolution_clock::now();
         
-        std::vector<Task*> tasks;
+        std::vector<std::unique_ptr<Task>> task_storage;
+        std::vector<Task*> task_ptrs;
+
+        // Step 1: Create all tasks
         for (int i = 0; i < NUM_TASKS; ++i) {
             auto task = std::make_unique<Task>(i, [&data]() {
                 data++;
             });
             
-            Task* raw = task.get();
-            if (i > 0) {
-                task->addDependency(tasks.back());  // Chain: 1→2→3→...
-            }
-            
-            tasks.push_back(raw);
-            scheduler.submit(std::move(task));
+            task_ptrs.push_back(task.get());
+            task_storage.push_back(std::move(task));
+        }
+
+        // Step 2: set dependencies
+        for (int i = 1; i < NUM_TASKS; ++i) {
+            task_storage[i]->addDependency(task_ptrs[i - 1]);
         }
         
+        // Step 3: Submit tasks
+        for (auto& task : task_storage) {
+            scheduler.submit(std::move(task));
+    }
+    
         scheduler.waitAll();
         
         auto end = std::chrono::high_resolution_clock::now();
@@ -181,15 +221,21 @@ void benchmark_dependencies() {
         auto root = std::make_unique<Task>(0, [&counter]() {
             counter++;
         });
-        Task* root_raw = root.get();
-        scheduler.submit(std::move(root));
+
+        Task* root_ptr = root.get();
         
         // 999 tasks waiting for root
+        std::vector<std::unique_ptr<Task>> dependent_tasks;
         for (int i = 1; i < NUM_TASKS; ++i) {
             auto task = std::make_unique<Task>(i, [&counter]() {
                 counter++;
             });
-            task->addDependency(root_raw);
+            task->addDependency(root_ptr);
+            dependent_tasks.push_back(std::move(task));
+        }
+
+        scheduler.submit(std::move(root));
+        for (auto& task : dependent_tasks) {
             scheduler.submit(std::move(task));
         }
         
@@ -328,9 +374,9 @@ int main() {
     std::cout << "========================================\n\n";
     
     // run benchmarks
-    benchmark_scaling();
-    // benchmark_overhead();
-    // benchmark_dependencies();
+    //benchmark_scaling();
+    //benchmark_latency();
+    benchmark_dependencies();
     // benchmark_allocation();
     // benchmark_dag();
     
