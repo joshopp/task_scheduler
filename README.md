@@ -63,15 +63,16 @@ The system is built on a modular architecture to ensure scalability and maintain
 
 ## Architecture
 
-graph TD
-    Client[Client/Main] -->|submit| TS[TaskScheduler]
-    TS -->|check deps| Dep[Dependency Graph]
-    Dep -->|if ready| TP[ThreadPool]
-    subgraph Worker Threads
-    TP --> W1[Worker 1]
-    TP --> W2[Worker 2]
-    TP --> WN[Worker N]
-    end
+```
+Client
+  ↓ submit(unique_ptr<Task>)
+TaskScheduler
+  ├─ Pending Tasks (waiting on deps)
+  └─ ThreadPool
+      ├─ Worker 1
+      ├─ Worker 2
+      └─ Worker N
+```
 
 ---
 
